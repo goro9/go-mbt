@@ -1,6 +1,7 @@
 package mbt
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
@@ -14,6 +15,12 @@ const (
 
 type Mbt []byte
 
+type MbtParts struct {
+	Hd []byte
+	Py []byte
+	Sg []byte
+}
+
 type Header struct {
 	Alg string
 	Typ string
@@ -24,38 +31,35 @@ type Payload struct {
 	Iat int64
 }
 
-type smbt struct {
-	header    Header
-	payload   Payload
-	signature []byte
-}
-
 func (mbt *Mbt) String() string {
-	smbt := mbt.toSmbt()
-	res := fmt.Sprintf("Header: %v, Payload: %v, Signature: %v", smbt.header, smbt.payload, smbt.signature)
+	mbtParts := mbt.ToMbtParts()
+	var header Header
+	err := msgpack.Unmarshal(mbtParts.Hd, &header)
+	if err != nil {
+		panic(err)
+	}
+	var payload Payload
+	err = msgpack.Unmarshal(mbtParts.Py, &payload)
+	if err != nil {
+		panic(err)
+	}
+	res := fmt.Sprintf("Header: %v, Payload: %v, Signature: %v", header, payload, mbtParts.Sg)
 	return res
 }
 
-func (mbt *Mbt) toSmbt() *smbt {
+func (mbt *Mbt) ToMbtParts() *MbtParts {
 	raw := []byte(*mbt)
-	dotPos := findAll(raw, DELIMITER)
-	hb := raw[:dotPos[0]]
-	pb := raw[dotPos[0]+1 : dotPos[1]]
-	sb := raw[dotPos[1]+1:]
+	dots := findAll(raw, DELIMITER)
+	mbtParts := MbtParts{
+		Hd: make([]byte, dots[0]),
+		Py: make([]byte, dots[1]-(dots[0]+1)),
+		Sg: make([]byte, len(raw)-(dots[1]+1)),
+	}
 
-	smbt := smbt{
-		signature: make([]byte, len(sb)),
-	}
-	err := msgpack.Unmarshal(hb, &smbt.header)
-	if err != nil {
-		panic(err)
-	}
-	err = msgpack.Unmarshal(pb, &smbt.payload)
-	if err != nil {
-		panic(err)
-	}
-	copy(smbt.signature, sb)
-	return &smbt
+	copy(mbtParts.Hd, raw[:dots[0]])
+	copy(mbtParts.Py, raw[dots[0]+1:dots[1]])
+	copy(mbtParts.Sg, raw[dots[1]+1:])
+	return &mbtParts
 }
 
 func findAll(list, target interface{}) []int {
@@ -84,14 +88,17 @@ func New(h *Header, p *Payload, key *[]byte) (*Mbt, error) {
 		return nil, err
 	}
 
+	var buf []byte
+	// buf = append(buf, hb..., DELIMITER, pb...)
+	buf = append(buf, hb...)
+	buf = append(buf, DELIMITER)
+	buf = append(buf, pb...)
+
+	signature := getSignature(buf, *key)
+
 	var mbt Mbt
-	mbt = append(mbt, hb...)
-	mbt = append(mbt, DELIMITER)
-	mbt = append(mbt, pb...)
-
-	signature := getSignature(mbt, *key)
-
-	mbt = append(mbt, DELIMITER)
+	// mbt = append(mbt, DELIMITER, signature...)
+	mbt = append(buf, DELIMITER)
 	mbt = append(mbt, signature...)
 	return &mbt, nil
 }
@@ -100,4 +107,15 @@ func getSignature(msg, key []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(msg)
 	return mac.Sum(nil)
+}
+
+func (mbt *Mbt) Verify(key *[]byte) bool {
+	mbtParts := mbt.ToMbtParts()
+	mbtUnsigned := append(mbtParts.Hd, DELIMITER)
+	mbtUnsigned = append(mbtUnsigned, mbtParts.Py...)
+	signature := getSignature(mbtUnsigned, *key)
+	if bytes.Compare(signature, mbtParts.Sg) != 0 {
+		return false
+	}
+	return true
 }
