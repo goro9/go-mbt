@@ -10,11 +10,14 @@ import (
 )
 
 const (
+	// DELIMITER is delimiter for separate part
 	DELIMITER byte = 0x2e
 )
 
+// Mbt is full token
 type Mbt []byte
 
+// MbtParts
 type MbtParts struct {
 	Hd []byte
 	Py []byte
@@ -47,37 +50,6 @@ func (mbt *Mbt) String() string {
 	return res
 }
 
-func (mbt *Mbt) ToMbtParts() *MbtParts {
-	raw := []byte(*mbt)
-	dots := findAll(raw, DELIMITER)
-	mbtParts := MbtParts{
-		Hd: make([]byte, dots[0]),
-		Py: make([]byte, dots[1]-(dots[0]+1)),
-		Sg: make([]byte, len(raw)-(dots[1]+1)),
-	}
-
-	copy(mbtParts.Hd, raw[:dots[0]])
-	copy(mbtParts.Py, raw[dots[0]+1:dots[1]])
-	copy(mbtParts.Sg, raw[dots[1]+1:])
-	return &mbtParts
-}
-
-func findAll(list, target interface{}) []int {
-	var res []int
-	switch list.(type) {
-	case []byte:
-		buf := list.([]byte)
-		for i := range buf {
-			if buf[i] == target {
-				res = append(res, i)
-			}
-		}
-		return res
-	default:
-		return nil
-	}
-}
-
 func New(h *Header, p *Payload, key *[]byte) (*Mbt, error) {
 	hb, err := msgpack.Marshal(h)
 	if err != nil {
@@ -96,17 +68,25 @@ func New(h *Header, p *Payload, key *[]byte) (*Mbt, error) {
 
 	signature := getSignature(buf, *key)
 
-	var mbt Mbt
 	// mbt = append(mbt, DELIMITER, signature...)
-	mbt = append(buf, DELIMITER)
-	mbt = append(mbt, signature...)
-	return &mbt, nil
+	buf = append(buf, DELIMITER)
+	buf = append(buf, signature...)
+	return (*Mbt)(&buf), nil
 }
 
-func getSignature(msg, key []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(msg)
-	return mac.Sum(nil)
+func (mbt *Mbt) ToMbtParts() *MbtParts {
+	raw := []byte(*mbt)
+	dots := findAll(raw, DELIMITER)
+	mbtParts := MbtParts{
+		Hd: make([]byte, dots[0]),
+		Py: make([]byte, dots[1]-(dots[0]+1)),
+		Sg: make([]byte, len(raw)-(dots[1]+1)),
+	}
+
+	copy(mbtParts.Hd, raw[:dots[0]])
+	copy(mbtParts.Py, raw[dots[0]+1:dots[1]])
+	copy(mbtParts.Sg, raw[dots[1]+1:])
+	return &mbtParts
 }
 
 func (mbt *Mbt) Verify(key *[]byte) bool {
@@ -118,4 +98,26 @@ func (mbt *Mbt) Verify(key *[]byte) bool {
 		return false
 	}
 	return true
+}
+
+func findAll(list, target interface{}) []int {
+	var res []int
+	switch list.(type) {
+	case []byte:
+		buf := list.([]byte)
+		for i := range buf {
+			if buf[i] == target {
+				res = append(res, i)
+			}
+		}
+		return res
+	default:
+		return nil
+	}
+}
+
+func getSignature(msg, key []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(msg)
+	return mac.Sum(nil)
 }
