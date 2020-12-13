@@ -14,43 +14,36 @@ const (
 	DELIMITER byte = 0x2e
 )
 
-// Mbt is full token
-type Mbt []byte
+// Token ...
+type Token []byte
 
-// MbtParts
-type MbtParts struct {
-	Hd []byte
-	Py []byte
-	Sg []byte
+// HeaderField ...
+type HeaderField struct {
+	Typ string `msgpack:"typ,omitempty"`
+	Cty string `msgpack:"cty,omitempty"`
+	Alg string `msgpack:"alg,omitempty"`
 }
 
-type Header struct {
-	Alg string
-	Typ string
+// PayloadClaimStd ...
+type PayloadClaimStd struct {
+	Iss string `msgpack:"iss,omitempty"`
+	Sub string `msgpack:"sub,omitempty"`
+	Aud string `msgpack:"aud,omitempty"`
+	Exp int64  `msgpack:"exp,omitempty"`
+	Nbf int64  `msgpack:"cbf,omitempty"`
+	Iat int64  `msgpack:"iat,omitempty"`
+	Jti string `msgpack:"jti,omitempty"`
 }
 
-type Payload struct {
-	Sub string
-	Iat int64
+// tokenParts ...
+type tokenParts struct {
+	header    []byte
+	payload   []byte
+	signature []byte
 }
 
-func (mbt *Mbt) String() string {
-	mbtParts := mbt.ToMbtParts()
-	var header Header
-	err := msgpack.Unmarshal(mbtParts.Hd, &header)
-	if err != nil {
-		panic(err)
-	}
-	var payload Payload
-	err = msgpack.Unmarshal(mbtParts.Py, &payload)
-	if err != nil {
-		panic(err)
-	}
-	res := fmt.Sprintf("Header: %v, Payload: %v, Signature: %v", header, payload, mbtParts.Sg)
-	return res
-}
-
-func New(h *Header, p *Payload, key *[]byte) (*Mbt, error) {
+// New create Messagepack Binary Token
+func New(h *HeaderField, p *PayloadClaimStd, key *[]byte) (*Token, error) {
 	hb, err := msgpack.Marshal(h)
 	if err != nil {
 		return nil, err
@@ -68,36 +61,53 @@ func New(h *Header, p *Payload, key *[]byte) (*Mbt, error) {
 
 	signature := getSignature(buf, *key)
 
-	// mbt = append(mbt, DELIMITER, signature...)
+	// buf = append(buf, DELIMITER, signature...)
 	buf = append(buf, DELIMITER)
 	buf = append(buf, signature...)
-	return (*Mbt)(&buf), nil
+	return (*Token)(&buf), nil
 }
 
-func (mbt *Mbt) ToMbtParts() *MbtParts {
-	raw := []byte(*mbt)
-	dots := findAll(raw, DELIMITER)
-	mbtParts := MbtParts{
-		Hd: make([]byte, dots[0]),
-		Py: make([]byte, dots[1]-(dots[0]+1)),
-		Sg: make([]byte, len(raw)-(dots[1]+1)),
+func (token *Token) String() string {
+	mbtParts := token.toTokenParts()
+	var header HeaderField
+	err := msgpack.Unmarshal(mbtParts.header, &header)
+	if err != nil {
+		panic(err)
 	}
-
-	copy(mbtParts.Hd, raw[:dots[0]])
-	copy(mbtParts.Py, raw[dots[0]+1:dots[1]])
-	copy(mbtParts.Sg, raw[dots[1]+1:])
-	return &mbtParts
+	var payload PayloadClaimStd
+	err = msgpack.Unmarshal(mbtParts.payload, &payload)
+	if err != nil {
+		panic(err)
+	}
+	res := fmt.Sprintf("Header: %v, Payload: %v, Signature: %v", header, payload, mbtParts.signature)
+	return res
 }
 
-func (mbt *Mbt) Verify(key *[]byte) bool {
-	mbtParts := mbt.ToMbtParts()
-	mbtUnsigned := append(mbtParts.Hd, DELIMITER)
-	mbtUnsigned = append(mbtUnsigned, mbtParts.Py...)
+// Verify ...
+func (token *Token) Verify(key *[]byte) bool {
+	mbtParts := token.toTokenParts()
+	mbtUnsigned := append(mbtParts.header, DELIMITER)
+	mbtUnsigned = append(mbtUnsigned, mbtParts.payload...)
 	signature := getSignature(mbtUnsigned, *key)
-	if bytes.Compare(signature, mbtParts.Sg) != 0 {
+	if bytes.Compare(signature, mbtParts.signature) != 0 {
 		return false
 	}
 	return true
+}
+
+func (token *Token) toTokenParts() *tokenParts {
+	raw := []byte(*token)
+	dots := findAll(raw, DELIMITER)
+	mbtParts := tokenParts{
+		header:    make([]byte, dots[0]),
+		payload:   make([]byte, dots[1]-(dots[0]+1)),
+		signature: make([]byte, len(raw)-(dots[1]+1)),
+	}
+
+	copy(mbtParts.header, raw[:dots[0]])
+	copy(mbtParts.payload, raw[dots[0]+1:dots[1]])
+	copy(mbtParts.signature, raw[dots[1]+1:])
+	return &mbtParts
 }
 
 func findAll(list, target interface{}) []int {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/goro9/go-mbt"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
@@ -14,11 +15,11 @@ const (
 )
 
 func TestTemp(t *testing.T) {
-	h := mbt.Header{
+	h := mbt.HeaderField{
 		Alg: "HS256",
 		Typ: "mbt",
 	}
-	p := mbt.Payload{
+	p := mbt.PayloadClaimStd{
 		Sub: "test",
 		Iat: time.Now().Unix(),
 	}
@@ -37,4 +38,46 @@ func TestTemp(t *testing.T) {
 	if token.Verify(&keyWrong) {
 		t.Fatalf("failed test")
 	}
+}
+
+func TestMsgpack(t *testing.T) {
+	hstr := mbt.HeaderField{
+		Alg: "HS256",
+		Typ: "mbt",
+	}
+	hbin, err := msgpack.Marshal(&hstr)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(hbin))
+
+	header := make(map[string]interface{})
+	header["alg"] = "HS256"
+	header["typ"] = "mbt"
+	hbin, err = msgpack.Marshal(&header)
+	if err != nil {
+		panic(err)
+	}
+
+	var item map[string]interface{}
+	err = msgpack.Unmarshal(hbin, &item)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(item)
+
+	payload := make(map[string]interface{})
+	payload["sub"] = "test"
+	payload["iat"] = time.Now().Unix()
+	pbin, err := msgpack.Marshal(&payload)
+	if err != nil {
+		panic(err)
+	}
+
+	var pres map[string]interface{}
+	err = msgpack.Unmarshal(pbin, &pres)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(pres)
 }
